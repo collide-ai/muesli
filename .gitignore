@@ -104,8 +104,9 @@ assets/muesli_app_icon_traced*.svg
 assets/menu_mic_template.png
 context.md
 
-# IDE
-.claude/
+# IDE — ignore Claude Code user state, but keep shared slash commands
+.claude/*
+!.claude/commands/
 *.swp
 *~
 .vercel
