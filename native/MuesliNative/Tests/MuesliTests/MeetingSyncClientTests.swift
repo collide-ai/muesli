@@ -76,16 +76,29 @@ struct MeetingSyncClientTests {
         #expect(!MeetingSyncError.audioUploadFailed(statusCode: 502, message: "x").isTerminal)
     }
 
-    @Test("testConnection returns success on 200 health response")
+    @Test("testConnection returns success on 200 health + 404 meetings probe")
     func testConnectionSuccess() async throws {
         let session = makeStubbedSession()
         StubURLProtocol.responder = { request in
-            #expect(request.url?.path == "/api/v1/health")
+            let path = request.url?.path ?? ""
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret-token")
-            let body = try! JSONSerialization.data(withJSONObject: ["ok": true, "version": "1.0.0-stub"])
+            if path == "/api/v1/health" {
+                let body = try! JSONSerialization.data(withJSONObject: ["ok": true, "version": "1.0.0-stub"])
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, body)
+            }
+            // Token-validation probe at /api/v1/meetings/{random-uuid} — the
+            // server hasn't heard of this UUID, so 404 is the expected answer
+            // when auth is good.
+            let body = try! JSONSerialization.data(withJSONObject: ["error": "not found", "code": "meeting_not_found"])
             let response = HTTPURLResponse(
                 url: request.url!,
-                statusCode: 200,
+                statusCode: 404,
                 httpVersion: "HTTP/1.1",
                 headerFields: ["Content-Type": "application/json"]
             )!
@@ -103,10 +116,23 @@ struct MeetingSyncClientTests {
         #expect(result == .success(version: "1.0.0-stub"))
     }
 
-    @Test("testConnection maps 401 to unauthorized")
+    @Test("testConnection maps 401 from meetings probe to unauthorized")
     func testConnectionUnauthorized() async throws {
         let session = makeStubbedSession()
         StubURLProtocol.responder = { request in
+            let path = request.url?.path ?? ""
+            if path == "/api/v1/health" {
+                // Health is unauthenticated in the new contract, so it returns
+                // 200 even with a bogus token; auth is verified separately.
+                let body = try! JSONSerialization.data(withJSONObject: ["ok": true, "version": "1.0.0-stub"])
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, body)
+            }
             let body = try! JSONSerialization.data(withJSONObject: ["error": "bad token", "code": "unauthorized"])
             let response = HTTPURLResponse(
                 url: request.url!,

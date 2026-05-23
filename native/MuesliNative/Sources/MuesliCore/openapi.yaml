@@ -5,8 +5,11 @@ info:
   summary: Single-tenant ingest API for the Muesli macOS dictation app.
   description: |
     Reference contract between the Muesli Mac client and a self-hosted
-    `muesli-sync-server`. The server is single-tenant: one user, one server,
-    one bearer token (matched in constant time against `MUESLI_SYNC_TOKEN`).
+    `app-muesli-sync` server. The server is single-tenant: one user, one
+    server, one bearer token (matched in constant time against
+    `MUESLI_SYNC_TOKEN`), with the sole exception of `GET /api/v1/health`
+    which is unauthenticated so probes and ad-hoc smoke tests don't need
+    to ship a token.
 
     This document is the **frozen wire-protocol contract**. Both implementations
     are bound to it. Server CI validates that real responses conform; the client
@@ -40,10 +43,13 @@ paths:
     get:
       operationId: getHealth
       tags: [health]
-      summary: Auth-required liveness probe.
+      summary: Unauthenticated liveness probe.
       description: |
-        Used by the Mac client's "Test connection" button. Auth is required so
-        the same call validates the bearer token end-to-end.
+        Used both by the Mac client's "Test connection" button and by
+        Kubernetes liveness/readiness probes (which can't easily ship a
+        bearer token). The global `BearerAuth` requirement is overridden
+        here via an empty security array.
+      security: []
       responses:
         "200":
           description: Server is healthy.
@@ -51,8 +57,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
   /api/v1/meetings:
     post:

@@ -165,12 +165,29 @@ actor MeetingSyncClient: MeetingSyncClientProtocol {
             return .invalidEndpoint(endpoint)
         }
         let client = makeClient(endpoint: normalized, token: token)
+
+        // `/health` is unauthenticated in the wire contract, so a 200 only proves
+        // reachability. Probe `GET /meetings/{random-uuid}` next to verify the
+        // bearer token: 401 = bad token, 404 = good token (unknown id).
+        let version: String
         do {
-            let output = try await client.getHealth(.init())
-            switch output {
+            let healthOutput = try await client.getHealth(.init())
+            switch healthOutput {
             case .ok(let body):
-                let payload = try body.body.json
-                return .success(version: payload.version)
+                version = try body.body.json.version
+            case .undocumented(statusCode: let code, _):
+                return .unexpectedStatus(code)
+            }
+        } catch {
+            return .unreachable(error.localizedDescription)
+        }
+
+        do {
+            let probeID = UUID().uuidString.lowercased()
+            let authOutput = try await client.getMeeting(path: .init(id: probeID))
+            switch authOutput {
+            case .ok, .notFound:
+                return .success(version: version)
             case .unauthorized:
                 return .unauthorized
             case .undocumented(statusCode: let code, _):
