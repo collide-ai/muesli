@@ -214,12 +214,12 @@ Key implementation details:
 
 ### Meeting Sync wire protocol (`MuesliCore/openapi.yaml`)
 
-The vendored copy at `native/MuesliNative/Sources/MuesliCore/openapi.yaml` is the source for `swift-openapi-generator` codegen. It MUST stay byte-identical to `docs/openapi.yaml` in the sibling [`collide-ai/muesli-sync-server`](https://github.com/collide-ai/muesli-sync-server) repo.
+The vendored copy at `native/MuesliNative/Sources/MuesliCore/openapi.yaml` is the source for `swift-openapi-generator` codegen. It MUST stay byte-identical to `docs/openapi.yaml` in the sibling [`collide-ai/app-muesli-sync`](https://github.com/collide-ai/app-muesli-sync) repo.
 
 When the server-side spec changes, re-vendor before merging:
 
 ```bash
-cp ~/src/playground/muesli-sync-server/docs/openapi.yaml \
+cp ~/src/playground/app-muesli-sync/docs/openapi.yaml \
    native/MuesliNative/Sources/MuesliCore/openapi.yaml
 swift test --package-path native/MuesliNative
 ```
