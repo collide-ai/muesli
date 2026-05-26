@@ -31,6 +31,7 @@ final class MeetingSyncWorker {
     private var kickWorkItem: DispatchWorkItem?
     private(set) var hasNetwork = true
     private var onStatsChanged: (@MainActor () -> Void)?
+    private var forceImmediate: Set<Int64> = []
 
     init(
         store: DictationStore,
@@ -103,6 +104,23 @@ final class MeetingSyncWorker {
         await drainOnce()
     }
 
+    /// Manual retry path. Flips each row's status back to `pending` (no-op if it isn't
+    /// `failed`) and arranges for the next drain to skip the per-row backoff window for
+    /// exactly these IDs. Used by the Settings → Sync activity UI for the per-row "Retry"
+    /// button and the bulk "Retry all failed" button.
+    func retry(meetingIDs: [Int64]) {
+        guard !meetingIDs.isEmpty else { return }
+        for id in meetingIDs {
+            do {
+                try store.requeueMeetingSync(meetingID: id)
+            } catch {
+                Self.logger.error("requeue meeting \(id) failed: \(error.localizedDescription, privacy: .public)")
+            }
+            forceImmediate.insert(id)
+        }
+        kick()
+    }
+
     // MARK: - Drain loop
 
     private func drainOnce() async {
@@ -122,6 +140,7 @@ final class MeetingSyncWorker {
                 earliestRetryDelay = min(earliestRetryDelay ?? delay, delay)
                 continue
             }
+            forceImmediate.remove(entry.meetingID)
             let attemptsAfterStart = entry.attempts + 1
             do {
                 try store.markMeetingSyncStarting(meetingID: entry.meetingID, at: now())
@@ -152,6 +171,9 @@ final class MeetingSyncWorker {
     }
 
     private func waitForNextAttempt(entry: MeetingSyncQueueEntry) -> TimeInterval? {
+        if forceImmediate.contains(entry.meetingID) {
+            return nil
+        }
         guard entry.attempts > 0,
               let raw = entry.lastAttemptAt,
               let lastAttemptDate = parseISO(raw) else {

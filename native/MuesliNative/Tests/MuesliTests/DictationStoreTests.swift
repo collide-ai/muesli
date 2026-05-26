@@ -1390,4 +1390,111 @@ struct DictationStoreTests {
         let entry = try store.meetingSyncEntry(meetingID: meetingID)
         #expect(entry == nil)
     }
+
+    @Test("recentMeetingSyncActivity orders by most recent event and includes meeting title")
+    func recentMeetingSyncActivityOrdering() throws {
+        let store = try makeStore()
+        let titled: (String) throws -> Int64 = { title in
+            try store.insertMeeting(
+                title: title,
+                calendarEventID: nil,
+                startTime: Date(),
+                endTime: Date().addingTimeInterval(60),
+                rawTranscript: "x",
+                formattedNotes: "",
+                micAudioPath: nil,
+                systemAudioPath: nil
+            )
+        }
+        let earlyDone = try titled("Early Done")
+        let recentFailed = try titled("Recent Failed")
+        let middlePending = try titled("Middle Pending")
+
+        let early = Date(timeIntervalSince1970: 1_700_000_000)
+        let middle = Date(timeIntervalSince1970: 1_700_000_500)
+        let recent = Date(timeIntervalSince1970: 1_700_001_000)
+
+        try store.enqueueMeetingSync(meetingID: earlyDone)
+        try store.markMeetingSyncStarting(meetingID: earlyDone, at: early)
+        try store.markMeetingSyncDone(meetingID: earlyDone, at: early)
+
+        try store.enqueueMeetingSync(meetingID: middlePending)
+        try store.markMeetingSyncStarting(meetingID: middlePending, at: middle)
+
+        try store.enqueueMeetingSync(meetingID: recentFailed)
+        try store.markMeetingSyncStarting(meetingID: recentFailed, at: recent)
+        try store.recordMeetingSyncFailure(meetingID: recentFailed, error: "HTTP 500: pgbouncer reset", terminal: true)
+
+        let rows = try store.recentMeetingSyncActivity(limit: 10)
+        #expect(rows.count == 3)
+        #expect(rows[0].meetingID == recentFailed)
+        #expect(rows[0].meetingTitle == "Recent Failed")
+        #expect(rows[0].status == .failed)
+        #expect(rows[0].lastError == "HTTP 500: pgbouncer reset")
+        #expect(rows[1].meetingID == middlePending)
+        #expect(rows[1].status == .uploading)
+        #expect(rows[2].meetingID == earlyDone)
+        #expect(rows[2].status == .done)
+        #expect(rows[2].lastSuccessAt != nil)
+    }
+
+    @Test("recentMeetingSyncActivity respects limit")
+    func recentMeetingSyncActivityLimit() throws {
+        let store = try makeStore()
+        for _ in 0..<5 {
+            let id = try insertSampleMeeting(store)
+            try store.enqueueMeetingSync(meetingID: id)
+        }
+        let rows = try store.recentMeetingSyncActivity(limit: 3)
+        #expect(rows.count == 3)
+    }
+
+    @Test("failedMeetingSyncIDs returns only failed rows")
+    func failedMeetingSyncIDsOnlyFailed() throws {
+        let store = try makeStore()
+        let pendingID = try insertSampleMeeting(store)
+        let failedA = try insertSampleMeeting(store)
+        let failedB = try insertSampleMeeting(store)
+        let doneID = try insertSampleMeeting(store)
+
+        try store.enqueueMeetingSync(meetingID: pendingID)
+        try store.enqueueMeetingSync(meetingID: failedA)
+        try store.recordMeetingSyncFailure(meetingID: failedA, error: "x", terminal: true)
+        try store.enqueueMeetingSync(meetingID: failedB)
+        try store.recordMeetingSyncFailure(meetingID: failedB, error: "y", terminal: true)
+        try store.enqueueMeetingSync(meetingID: doneID)
+        try store.markMeetingSyncDone(meetingID: doneID)
+
+        let ids = try store.failedMeetingSyncIDs()
+        #expect(Set(ids) == Set([failedA, failedB]))
+    }
+
+    @Test("requeueMeetingSync flips failed to pending and preserves history")
+    func requeueMeetingSyncPreservesHistory() throws {
+        let store = try makeStore()
+        let meetingID = try insertSampleMeeting(store)
+        try store.enqueueMeetingSync(meetingID: meetingID)
+        try store.markMeetingSyncStarting(meetingID: meetingID)
+        try store.recordMeetingSyncFailure(meetingID: meetingID, error: "boom", terminal: true)
+
+        let changed = try store.requeueMeetingSync(meetingID: meetingID)
+        #expect(changed == true)
+
+        let entry = try store.meetingSyncEntry(meetingID: meetingID)
+        #expect(entry?.status == .pending)
+        #expect(entry?.attempts == 1) // preserved
+        #expect(entry?.lastError == "boom") // preserved
+    }
+
+    @Test("requeueMeetingSync is a no-op for non-failed rows")
+    func requeueMeetingSyncNoOpForNonFailed() throws {
+        let store = try makeStore()
+        let meetingID = try insertSampleMeeting(store)
+        try store.enqueueMeetingSync(meetingID: meetingID)
+
+        let changed = try store.requeueMeetingSync(meetingID: meetingID)
+        #expect(changed == false)
+        let entry = try store.meetingSyncEntry(meetingID: meetingID)
+        #expect(entry?.status == .pending)
+    }
 }

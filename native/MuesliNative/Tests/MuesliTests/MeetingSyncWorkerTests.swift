@@ -167,6 +167,40 @@ struct MeetingSyncWorkerTests {
         #expect(entry?.status == .pending)
     }
 
+    @Test("retry bypasses backoff window and attempts the row immediately")
+    @MainActor
+    func retryBypassesBackoff() async throws {
+        let store = try makeStore()
+        let meetingID = try enqueueMeeting(store)
+        // Simulate a recent failure inside the backoff window.
+        try store.markMeetingSyncStarting(meetingID: meetingID, at: Date())
+        try store.recordMeetingSyncFailure(meetingID: meetingID, error: "transient", terminal: true)
+
+        var config = AppConfig()
+        config.meetingSyncEnabled = true
+        let client = StubSyncClient(behavior: .success)
+
+        let worker = MeetingSyncWorker(
+            store: store,
+            client: client,
+            configProvider: { config },
+            now: { Date() }   // immediately after the failed attempt
+        )
+
+        // Confirm a plain drain would skip the row due to backoff + failed status.
+        await runWorkerOnce(worker: worker)
+        #expect(client.callCount == 0)
+        #expect(try store.meetingSyncEntry(meetingID: meetingID)?.status == .failed)
+
+        // retry() should requeue the row AND force-bypass the per-row backoff.
+        worker.retry(meetingIDs: [meetingID])
+        await runWorkerOnce(worker: worker)
+
+        #expect(client.callCount == 1)
+        let entry = try store.meetingSyncEntry(meetingID: meetingID)
+        #expect(entry?.status == .done)
+    }
+
     @Test("disabled sync makes kick a no-op")
     @MainActor
     func disabledSyncSkipsDrain() async throws {

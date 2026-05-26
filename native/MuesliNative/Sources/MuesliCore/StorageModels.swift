@@ -355,6 +355,43 @@ public struct MeetingSyncQueueStats: Equatable, Sendable {
     }
 }
 
+public struct MeetingSyncActivityRow: Equatable, Sendable {
+    public let meetingID: Int64
+    public let meetingTitle: String
+    public let meetingStartTime: String
+    public let status: MeetingSyncStatus
+    public let attempts: Int
+    public let lastAttemptAt: String?
+    public let lastSuccessAt: String?
+    public let lastError: String?
+    public let createdAt: String
+    public let lastEventAt: String
+
+    public init(
+        meetingID: Int64,
+        meetingTitle: String,
+        meetingStartTime: String,
+        status: MeetingSyncStatus,
+        attempts: Int,
+        lastAttemptAt: String?,
+        lastSuccessAt: String?,
+        lastError: String?,
+        createdAt: String,
+        lastEventAt: String
+    ) {
+        self.meetingID = meetingID
+        self.meetingTitle = meetingTitle
+        self.meetingStartTime = meetingStartTime
+        self.status = status
+        self.attempts = attempts
+        self.lastAttemptAt = lastAttemptAt
+        self.lastSuccessAt = lastSuccessAt
+        self.lastError = lastError
+        self.createdAt = createdAt
+        self.lastEventAt = lastEventAt
+    }
+}
+
 public struct MeetingStats: Codable, Sendable {
     public let totalWords: Int
     public let totalMeetings: Int

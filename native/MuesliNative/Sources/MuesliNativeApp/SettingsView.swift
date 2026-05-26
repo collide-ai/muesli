@@ -101,6 +101,11 @@ struct SettingsView: View {
     @State private var syncTestStatus: SyncTestStatus = .idle
     @State private var syncStats: MeetingSyncQueueStats = MeetingSyncQueueStats(pending: 0, failed: 0, lastSuccessAt: nil)
     @State private var syncStatsTimer: Timer?
+    @State private var syncActivity: [MeetingSyncActivityRow] = []
+    @State private var showAllSyncActivity = false
+    @State private var expandedSyncErrorMeetingIDs: Set<Int64> = []
+    private let syncActivityDefaultLimit = 50
+    private let syncActivityExpandedLimit = 500
 
     enum SyncTestStatus: Equatable {
         case idle
@@ -898,14 +903,230 @@ struct SettingsView: View {
             settingsSection("Status") {
                 syncStatusPill
             }
+
+            syncActivitySection
         }
         .onAppear {
             refreshSyncStats()
+            refreshSyncActivity()
             startSyncStatsTimer()
         }
         .onDisappear {
             stopSyncStatsTimer()
         }
+    }
+
+    @ViewBuilder
+    private var syncActivitySection: some View {
+        let failedCount = syncActivity.reduce(into: 0) { acc, row in
+            if row.status == .failed { acc += 1 }
+        }
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
+            HStack(spacing: 8) {
+                Text("Sync activity")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                Spacer()
+                if failedCount > 0 {
+                    Button {
+                        controller.retryAllFailedMeetingSyncs()
+                        refreshSyncActivity()
+                        refreshSyncStats()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 10, weight: .medium))
+                            Text("Retry all failed")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MuesliTheme.accent)
+                }
+            }
+
+            if syncActivity.isEmpty {
+                Text("No sync activity yet.")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(syncActivity.enumerated()), id: \.element.meetingID) { index, row in
+                        if index > 0 {
+                            Divider().background(MuesliTheme.surfaceBorder)
+                        }
+                        syncActivityRow(row)
+                    }
+                }
+                .padding(.vertical, MuesliTheme.spacing8)
+                .background(MuesliTheme.surfacePrimary)
+                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall)
+                        .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+                )
+
+                syncActivityFooter
+            }
+        }
+        .padding(MuesliTheme.spacing16)
+        .background(MuesliTheme.backgroundRaised)
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium))
+        .overlay(
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium)
+                .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func syncActivityRow(_ row: MeetingSyncActivityRow) -> some View {
+        let info = syncActivityStatusInfo(row.status)
+        let title = row.meetingTitle.isEmpty ? "Untitled meeting" : row.meetingTitle
+        let timestamp = relativeSyncTimestamp(row.lastEventAt)
+        let showError = row.status == .failed
+            && (row.lastError?.isEmpty == false)
+            && expandedSyncErrorMeetingIDs.contains(row.meetingID)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(info.color)
+                        .frame(width: 6, height: 6)
+                    Text(info.label)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(info.color)
+                }
+                .frame(width: 78, alignment: .leading)
+
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("\(timestamp) · attempt \(row.attempts)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(MuesliTheme.textTertiary)
+                    .lineLimit(1)
+
+                if row.status == .uploading {
+                    Text("uploading…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                } else if row.status == .failed {
+                    Button {
+                        controller.retryMeetingSync(meetingIDs: [row.meetingID])
+                        refreshSyncActivity()
+                        refreshSyncStats()
+                    } label: {
+                        Text("Retry")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(MuesliTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if row.status == .failed, let errorText = row.lastError, !errorText.isEmpty {
+                Button {
+                    toggleSyncErrorExpansion(row.meetingID)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: showError ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .medium))
+                        Text(showError ? "Hide error" : "Show error")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .padding(.leading, 88)
+                }
+                .buttonStyle(.plain)
+
+                if showError {
+                    Text(errorText)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 88)
+                        .padding(.trailing, 8)
+                        .padding(.vertical, 4)
+                }
+            }
+        }
+        .padding(.horizontal, MuesliTheme.spacing12)
+        .padding(.vertical, MuesliTheme.spacing8)
+    }
+
+    @ViewBuilder
+    private var syncActivityFooter: some View {
+        let limit = showAllSyncActivity ? syncActivityExpandedLimit : syncActivityDefaultLimit
+        HStack(spacing: 6) {
+            Text("Showing \(syncActivity.count)")
+                .font(.system(size: 11))
+                .foregroundStyle(MuesliTheme.textTertiary)
+            Spacer()
+            if syncActivity.count >= limit {
+                Button {
+                    showAllSyncActivity.toggle()
+                    refreshSyncActivity()
+                } label: {
+                    Text(showAllSyncActivity ? "Show recent" : "Show all")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MuesliTheme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func toggleSyncErrorExpansion(_ meetingID: Int64) {
+        if expandedSyncErrorMeetingIDs.contains(meetingID) {
+            expandedSyncErrorMeetingIDs.remove(meetingID)
+        } else {
+            expandedSyncErrorMeetingIDs.insert(meetingID)
+        }
+    }
+
+    private func syncActivityStatusInfo(_ status: MeetingSyncStatus) -> (label: String, color: Color) {
+        switch status {
+        case .done:
+            return ("Done", MuesliTheme.success)
+        case .failed:
+            return ("Failed", MuesliTheme.recording)
+        case .uploading:
+            return ("Uploading", MuesliTheme.accent)
+        case .pending:
+            return ("Pending", MuesliTheme.accent)
+        }
+    }
+
+    private func relativeSyncTimestamp(_ raw: String) -> String {
+        let isoWithFractional = ISO8601DateFormatter()
+        isoWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        let sqliteFallback: DateFormatter = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = TimeZone(identifier: "UTC")
+            f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            return f
+        }()
+        let date = isoWithFractional.date(from: raw)
+            ?? plain.date(from: raw)
+            ?? sqliteFallback.date(from: raw)
+        guard let date else { return raw }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func refreshSyncActivity() {
+        let limit = showAllSyncActivity ? syncActivityExpandedLimit : syncActivityDefaultLimit
+        syncActivity = controller.meetingSyncActivity(limit: limit)
     }
 
     @ViewBuilder
@@ -1057,6 +1278,7 @@ struct SettingsView: View {
         let timer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { _ in
             Task { @MainActor in
                 refreshSyncStats()
+                refreshSyncActivity()
             }
         }
         timer.tolerance = 1.0

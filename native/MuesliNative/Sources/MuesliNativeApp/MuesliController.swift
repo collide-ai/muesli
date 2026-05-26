@@ -2816,6 +2816,19 @@ final class MuesliController: NSObject {
         (try? dictationStore.meetingSyncStats()) ?? MeetingSyncQueueStats(pending: 0, failed: 0, lastSuccessAt: nil)
     }
 
+    func meetingSyncActivity(limit: Int = 50) -> [MeetingSyncActivityRow] {
+        (try? dictationStore.recentMeetingSyncActivity(limit: limit)) ?? []
+    }
+
+    func retryMeetingSync(meetingIDs: [Int64]) {
+        meetingSyncWorker.retry(meetingIDs: meetingIDs)
+    }
+
+    func retryAllFailedMeetingSyncs() {
+        let ids = (try? dictationStore.failedMeetingSyncIDs()) ?? []
+        meetingSyncWorker.retry(meetingIDs: ids)
+    }
+
     func kickMeetingSync() {
         meetingSyncWorker.kick()
     }

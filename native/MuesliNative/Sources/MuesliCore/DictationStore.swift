@@ -1496,6 +1496,88 @@ public final class DictationStore {
         }
     }
 
+    public func recentMeetingSyncActivity(limit: Int = 50) throws -> [MeetingSyncActivityRow] {
+        let db = try openDatabase()
+        defer { sqlite3_close(db) }
+        let sql = """
+        SELECT
+            q.meeting_id, m.title, m.start_time, q.status, q.attempts,
+            q.last_attempt_at, q.last_success_at, q.last_error, q.created_at,
+            COALESCE(q.last_attempt_at, q.last_success_at, q.created_at) AS last_event_at
+        FROM meeting_sync_queue q
+        JOIN meetings m ON m.id = q.meeting_id
+        ORDER BY last_event_at DESC
+        LIMIT ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw lastError(db)
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int(statement, 1, Int32(max(limit, 0)))
+        var rows: [MeetingSyncActivityRow] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let lastAttempt: String? = sqlite3_column_type(statement, 5) == SQLITE_NULL ? nil : stringColumn(statement, index: 5)
+            let lastSuccess: String? = sqlite3_column_type(statement, 6) == SQLITE_NULL ? nil : stringColumn(statement, index: 6)
+            let lastErrorText: String? = sqlite3_column_type(statement, 7) == SQLITE_NULL ? nil : stringColumn(statement, index: 7)
+            let status = MeetingSyncStatus(rawValue: stringColumn(statement, index: 3)) ?? .pending
+            rows.append(MeetingSyncActivityRow(
+                meetingID: sqlite3_column_int64(statement, 0),
+                meetingTitle: stringColumn(statement, index: 1),
+                meetingStartTime: stringColumn(statement, index: 2),
+                status: status,
+                attempts: Int(sqlite3_column_int(statement, 4)),
+                lastAttemptAt: lastAttempt,
+                lastSuccessAt: lastSuccess,
+                lastError: lastErrorText,
+                createdAt: stringColumn(statement, index: 8),
+                lastEventAt: stringColumn(statement, index: 9)
+            ))
+        }
+        return rows
+    }
+
+    public func failedMeetingSyncIDs() throws -> [Int64] {
+        let db = try openDatabase()
+        defer { sqlite3_close(db) }
+        let sql = "SELECT meeting_id FROM meeting_sync_queue WHERE status = 'failed' ORDER BY meeting_id ASC"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw lastError(db)
+        }
+        defer { sqlite3_finalize(statement) }
+        var ids: [Int64] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            ids.append(sqlite3_column_int64(statement, 0))
+        }
+        return ids
+    }
+
+    /// Flips a row's `status` back to `pending` so the worker will pick it up on the next drain.
+    /// Leaves `attempts` and `last_error` intact so the activity log still shows history until
+    /// the next attempt overwrites them. No-ops for rows whose status is already `pending` or
+    /// `uploading`. Returns true if the row was actually changed.
+    @discardableResult
+    public func requeueMeetingSync(meetingID: Int64) throws -> Bool {
+        let db = try openDatabase()
+        defer { sqlite3_close(db) }
+        let sql = """
+        UPDATE meeting_sync_queue
+        SET status = 'pending'
+        WHERE meeting_id = ? AND status = 'failed'
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw lastError(db)
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, meetingID)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw lastError(db)
+        }
+        return sqlite3_changes(db) > 0
+    }
+
     public func meetingSyncStats() throws -> MeetingSyncQueueStats {
         let db = try openDatabase()
         defer { sqlite3_close(db) }
