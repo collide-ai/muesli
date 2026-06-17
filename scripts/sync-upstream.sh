@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-upstream.sh — pull upstream changes into the heysamtexas/muesli fork
+# sync-upstream.sh — pull upstream changes into the collide-ai/muesli fork
 #
 # Fast-forwards main to upstream/main, rebases each feat/* branch onto the new
 # main, then rebuilds release/collide = main + (each feat/* branch merged).
@@ -51,7 +51,7 @@ fi
 
 echo ""
 echo "Upstream commits to pull ($(git rev-list --count "$OLD_MAIN..$NEW_MAIN")):"
-git log --oneline "$OLD_MAIN..$NEW_MAIN" | head -20
+git log --oneline -n 20 "$OLD_MAIN..$NEW_MAIN"
 if [ "$(git rev-list --count "$OLD_MAIN..$NEW_MAIN")" -gt 20 ]; then
     echo "  ... (more)"
 fi
