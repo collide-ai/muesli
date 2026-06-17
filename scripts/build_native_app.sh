@@ -177,32 +177,42 @@ rm -rf "$APP_DIR"
 ditto "$STAGED_APP_DIR" "$APP_DIR"
 
 if [[ "$SKIP_SIGN" != "1" ]]; then
-  if ! security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
+  if [[ "$SIGN_IDENTITY" != "-" ]] && ! security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
     echo "Signing identity not found: $SIGN_IDENTITY" >&2
     echo "For local contributor builds without this certificate, run: MUESLI_SKIP_SIGN=1 ./scripts/dev-test.sh" >&2
     exit 1
   fi
+
+  # Hardened runtime + secure timestamp need a real Developer ID. Ad-hoc signing
+  # cannot satisfy hardened-runtime team-ID linkage, so dyld would reject loading
+  # bundled frameworks (e.g., Sparkle) at launch. Strip both flags for ad-hoc.
+  if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    SIGN_OPTS=""
+  else
+    SIGN_OPTS="--options runtime $CODESIGN_TIMESTAMP"
+  fi
+  export SIGN_OPTS SIGN_IDENTITY
 
   # Sign all bundled frameworks, including nested Sparkle executables.
   find "$APP_DIR/Contents/MacOS" -maxdepth 1 -name "*.framework" -type d | while read -r framework; do
     if [[ "$(basename "$framework")" == "Sparkle.framework" ]]; then
       find "$framework" -type f -perm +111 | while read -r binary; do
         if file "$binary" | grep -q "Mach-O"; then
-          codesign --force --options runtime "$CODESIGN_TIMESTAMP" \
+          codesign --force $SIGN_OPTS \
             --sign "$SIGN_IDENTITY" "$binary"
         fi
       done
       find "$framework" -name "*.xpc" -type d | while read -r xpc; do
-        codesign --force --options runtime "$CODESIGN_TIMESTAMP" \
+        codesign --force $SIGN_OPTS \
           --sign "$SIGN_IDENTITY" "$xpc"
       done
       find "$framework" -name "*.app" -type d | while read -r app; do
-        codesign --force --options runtime "$CODESIGN_TIMESTAMP" \
+        codesign --force $SIGN_OPTS \
           --sign "$SIGN_IDENTITY" "$app"
       done
     fi
 
-    codesign --force --options runtime "$CODESIGN_TIMESTAMP" \
+    codesign --force $SIGN_OPTS \
       --sign "$SIGN_IDENTITY" \
       "$framework"
   done
@@ -211,19 +221,19 @@ if [[ "$SKIP_SIGN" != "1" ]]; then
   # library validation requires these to have the same Team ID as the app.
   find "$APP_DIR/Contents/MacOS" -maxdepth 1 \( -name "liblocalvqe*.dylib" -o -name "libggml*.dylib" -o -name "libggml*.so" \) -type f | while read -r library; do
     if file "$library" | grep -q "Mach-O"; then
-      codesign --force --options runtime "$CODESIGN_TIMESTAMP" \
+      codesign --force $SIGN_OPTS \
         --sign "$SIGN_IDENTITY" \
         "$library"
     fi
   done
 
-  codesign --force --options runtime "$CODESIGN_TIMESTAMP" \
+  codesign --force $SIGN_OPTS \
     --sign "$SIGN_IDENTITY" \
     "$APP_DIR/Contents/MacOS/muesli-cli"
 
   # Sign the app bundle with hardened runtime, secure timestamp, and entitlements
   ENTITLEMENTS="$ROOT/scripts/Muesli.entitlements"
-  codesign --force --options runtime "$CODESIGN_TIMESTAMP" \
+  codesign --force $SIGN_OPTS \
     --entitlements "$ENTITLEMENTS" \
     --sign "$SIGN_IDENTITY" \
     "$APP_DIR"
