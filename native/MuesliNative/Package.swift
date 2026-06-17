@@ -20,15 +20,24 @@ let package = Package(
         .package(url: "https://github.com/obra/LLM.swift.git", revision: "f1e1e11982dbc59662be191b8bed408dfb48e9df"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.3"),
         .package(url: "https://github.com/MimicScribe/dtln-aec-coreml.git", from: "0.4.0-beta"),
+        .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.12.0"),
+        .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-openapi-urlsession", from: "1.3.0"),
+        .package(url: "https://github.com/apple/swift-http-types", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.2.0"),
     ],
     targets: [
         .target(
             name: "MuesliCore",
-            dependencies: [],
+            dependencies: [
+                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+            ],
             path: "Sources/MuesliCore",
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
+            ],
+            plugins: [
+                .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),
             ]
         ),
         .executableTarget(
@@ -43,6 +52,9 @@ let package = Package(
                 .product(name: "DTLNAecCoreML", package: "dtln-aec-coreml"),
                 .product(name: "DTLNAec512", package: "dtln-aec-coreml"),
                 "LocalVQEBridge",
+                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+                .product(name: "OpenAPIURLSession", package: "swift-openapi-urlsession"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
             ],
             path: "Sources/MuesliNativeApp",
             swiftSettings: [
