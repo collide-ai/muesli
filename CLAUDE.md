@@ -6,6 +6,46 @@ Local-first macOS app for **dictation** and **meeting transcription** on Apple S
 
 **Status:** Live and public. Available at [GitHub Releases](https://github.com/Muesli-HQ/muesli/releases). Signed, notarized, stapled.
 
+## Fork Workflow
+
+This repo (`heysamtexas/muesli`) is a fork of `pHequals7/muesli` with local customizations. Branches are organized so upstream stays a fast-forward and customizations stay isolated:
+
+- **`main`** — clean mirror of `upstream/main`. **Never commit to it directly.** Pull-only via `/sync-upstream`.
+- **`release/collide`** — ship branch. `main` + every active `feat/*` merged in. This is what `scripts/release.sh` builds from. CI for shipped builds runs here.
+- **`feat/*`** — each fork-only customization on its own branch off `upstream/main`:
+  - `feat/byo-meeting-sync` — self-hosted meeting sync (BYO server, opt-in)
+  - `feat/onboarding-dedup` — fix for stacked onboarding windows
+  - `feat/dev-codesigning` — auto-pick stable signing identity + ad-hoc signing for dev builds
+  - `feat/no-telemetrydeck` — drops TelemetryDeck (no remote analytics)
+  - `feat/sync-tooling` — this workflow's sync script + slash command
+
+### Pulling upstream
+
+```bash
+/sync-upstream                  # in Claude Code
+# or
+bash scripts/sync-upstream.sh   # standalone
+```
+
+The script fast-forwards `main`, rebases each `feat/*` onto the new `main` (force-with-lease push), and rebuilds `release/collide`. Exit code 0 = clean, 3 = a branch hit conflicts and needs manual resolution.
+
+### Adding a new fork customization
+
+```bash
+git checkout -b feat/new-thing main      # branch off clean main, not release/collide
+# ... edit, commit ...
+git push -u origin feat/new-thing
+git checkout release/collide
+git merge --no-ff feat/new-thing
+git push --force-with-lease origin release/collide
+```
+
+### Hard rules
+
+- Never `git push --force` against any shared branch; use `--force-with-lease`.
+- Never force-push `main`. If a sync run reports "main has diverged," investigate — someone committed there by accident.
+- `feat/no-telemetrydeck` regularly conflicts with upstream adding new `TelemetryDeck.signal(...)` calls. Resolution is mechanical: keep "ours" (the removal).
+
 ## What It Does
 
 - **Dictation:** Hold hotkey → speak → release → text pasted at cursor (~0.13s with Parakeet)
