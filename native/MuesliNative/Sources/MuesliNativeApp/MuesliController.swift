@@ -3,7 +3,6 @@ import AVFoundation
 import CoreAudio
 import Foundation
 import Sparkle
-import TelemetryDeck
 import MuesliCore
 
 private enum DictationOutputMode {
@@ -1977,15 +1976,6 @@ final class MuesliController: NSObject {
             if shouldRunMeetingFeatureMonitors {
                 startMeetingFeatureMonitors(includeMaraudersMap: false)
             }
-            TelemetryDeck.signal("onboarding.completed", parameters: [
-                "use_case": onboardingUseCase.rawValue,
-                "voice_notes_selected": onboardingUseCase.includesVoiceNotes ? "true" : "false",
-                "dictation_selected": onboardingUseCase.includesDictation ? "true" : "false",
-                "meetings_selected": onboardingUseCase.includesMeetings ? "true" : "false",
-                "microphone_granted": AVCaptureDevice.authorizationStatus(for: .audio) == .authorized ? "true" : "false",
-                "accessibility_granted": AXIsProcessTrusted() ? "true" : "false",
-                "input_monitoring_granted": CGPreflightListenEventAccess() ? "true" : "false",
-            ])
             let completionTab = OnboardingFlow.completionTab(for: onboardingUseCase)
             openHistoryWindow(tab: completionTab)
         } else {
@@ -2052,11 +2042,6 @@ final class MuesliController: NSObject {
         hotkeyMonitor.start()
         startComputerUseHotkeyMonitorIfNeeded()
         syncDictationRecorderWarmup(intent: .idlePrewarm(.permissionsReady))
-        TelemetryDeck.signal("onboarding.use_case_reclassified", parameters: [
-            "from_use_case": OnboardingUseCase.voiceNotes.rawValue,
-            "to_use_case": OnboardingUseCase.dictation.rawValue,
-            "reason": "dictation_permissions_granted",
-        ])
     }
 
     private func ensureBasicDictationPermissionsBeforeDashboard() -> Bool {
@@ -3167,7 +3152,6 @@ final class MuesliController: NSObject {
                 self.syncAppState()
                 self.historyWindowController?.reload()
                 self.showMeetingDocument(id: result.meetingID)
-                TelemetryDeck.signal("meeting.imported")
             }
         } catch is CancellationError {
             await MainActor.run {
@@ -3877,7 +3861,6 @@ final class MuesliController: NSObject {
                 if let meetingResult {
                     self.cleanupTemporaryMeetingAudioFiles(for: meetingResult)
                 }
-                TelemetryDeck.signal("meeting.completed")
 
                 self.enqueueOrShowMeetingCompletionNotification(
                     meetingID: completedMeetingID,
@@ -4684,11 +4667,6 @@ final class MuesliController: NSObject {
                 )
                 try Task.checkCancellation()
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                await MainActor.run {
-                    TelemetryDeck.signal("computer_use.command_parsed", parameters: [
-                        "planner_enabled": self.config.enableComputerUsePlanner ? "true" : "false",
-                    ])
-                }
                 guard !text.isEmpty else {
                     fputs("[cua] empty transcript, skipping planner\n", stderr)
                     await MainActor.run {
@@ -4762,9 +4740,6 @@ final class MuesliController: NSObject {
             computerUseCommandTask = nil
             setState(.idle)
             meetingMonitor.resumeAfterCooldown()
-            TelemetryDeck.signal("computer_use.command_finished", parameters: [
-                "status": "\(result.status)",
-            ])
             return
         }
         persistComputerUseTrace(result, dictationID: dictationID)
@@ -4772,9 +4747,6 @@ final class MuesliController: NSObject {
         await waitForComputerUseFloatingStatusDwell()
         presentComputerUseRuntimeResult(result)
         meetingMonitor.resumeAfterCooldown()
-        TelemetryDeck.signal("computer_use.command_finished", parameters: [
-            "status": "\(result.status)",
-        ])
     }
 
     @MainActor
@@ -5650,10 +5622,6 @@ final class MuesliController: NSObject {
                     self.setState(.idle)
                     self.meetingMonitor.resumeAfterCooldown()
                     self.syncDictationRecorderWarmup(intent: .postDictation(.transcriptionComplete))
-                    TelemetryDeck.signal("dictation.completed", parameters: [
-                        "backend": self.selectedBackend.backend,
-                        "paste_method": outputMode.pasteMethod,
-                    ])
                 }
             } catch is CancellationError {
                 fputs("[muesli-native] test dictation cancelled\n", stderr)
