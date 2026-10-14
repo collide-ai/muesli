@@ -94,7 +94,6 @@ Note: config JSON uses snake_case keys (`has_completed_onboarding`, not `hasComp
 ### Pull Requests
 - **CI workflow** (`.github/workflows/ci.yml`): macOS 15 runners
   - `changes` → `build` → `cli-smoke` → `ci-gate` (required check)
-- **Claude Code Review** — reviews every PR automatically
 - **Greptile** — reviews every PR automatically
 - **Vercel** — scoped to `site/` only
 - **Concurrency** — stale CI runs auto-cancelled on new pushes
